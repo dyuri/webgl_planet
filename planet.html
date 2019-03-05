@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Three.js proba</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    #scene {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+<script src="three.js"></script>
+<script id="vs" type="x-shader/x-vertex">
+  varying vec4 v_color;
+  varying vec2 v_uv;
+  
+  void main() {
+  
+    v_uv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    v_color = vec4(position.z * position.x * 0.5 + 0.5, position.z * position.y * 0.5 + 0.5, position.z * 0.5 + 0.5, 1.0);
+  
+  }
+</script>
+<script id="fs" type="x-shader/x-fragment">
+  precision highp float;
+  precision highp int;
+  varying vec2 v_uv;
+  uniform float u_time;
+  uniform vec3 u_mouse;
+  uniform vec2 u_resolution;
+  uniform sampler2D texture1;
+
+  #define R 1.5
+  #define max_distance 300.0
+  #define epsilon 0.001
+  #define max_steps 200
+  #define K 0.37
+  #define shininess 2.0
+  #define ambient 0.02
+  #define bump_factor 0.05
+  #define specular_koef .1
+  #define diffuse_koef .9
+  #define FOV 60.0
+  #define sun_distance 1000.0
+  #define SPEED .5
+  #define PI 3.14159265359
+  #define DISTORT true
+
+  vec4 texture3d (sampler2D t, vec3 p, vec3 n, float scale) {
+    p = p/PI + .5;
+    return 
+      texture2D(t, p.yz * scale) * abs (n.x) +
+      texture2D(t, p.xz * scale) * abs (n.y) +
+      texture2D(t, p.xy * scale) * abs (n.z);
+  }
+
+  float rng12(vec2 seed)
+  {
+      return fract(sin(dot(seed, vec2(127.1,311.7))) * 43758.5453123);
+  }
+
+  float rng11(float seed)
+  {
+      return rng12(vec2(seed, 1.0));
+  }
+
+  float smin( float a, float b, float k) {
+      float res = exp( -k*a ) + exp( -k*b );
+      return -log( res )/k;
+  }
+
+  float get_distance(vec3 point) {
+    float bump = 0.0;
+    
+    if ( length(point) < R + bump_factor) {
+        // bump = bump_factor * length(texture2D(texture1, point.xy).rgb) / 3.;
+      bump = bump_factor * length(texture3d(texture1, point, normalize(-point), 1.).rgb) / 3.;
+    }
+
+    return length(point) - R + bump;
+  }
+
+  float raymarch(vec3 ray_origin, vec3 ray_direction) {
+    float d = 0.0;
+    
+    for (int i = 0; i < max_steps; i++) {
+      vec3 new_point = ray_origin + ray_direction*d;
+      float s = get_distance(new_point);
+      if (s < epsilon) return d;
+      d += s;
+      if (d > max_distance) return max_distance;
+    }
+    return max_distance;
+  }
+
+  vec3 get_normal(vec3 point) {
+    float d0 = get_distance(point);
+    float dX = get_distance(point-vec3(epsilon, 0.0, 0.0));
+    float dY = get_distance(point-vec3(0.0, epsilon, 0.0));
+    float dZ = get_distance(point-vec3(0.0, 0.0, epsilon));
+      
+    return normalize(vec3(dX-d0, dY-d0, dZ-d0));
+  }
+
+  mat3 rotateY(float fi) {
+    return mat3(
+        cos(fi), 0.0, sin(fi),
+        0.0, 1.0, 0.0,
+      -sin(fi), 0.0, cos(fi)
+    );
+  }
+
+  mat3 rotateX(float fi) {
+    return mat3(
+      1.0, 0.0, 0.0,
+      0.0, cos(fi), -sin(fi),
+      0.0, sin(fi), cos(fi)
+    );	
+  }
+
+  float shadow_sample (vec3 org, vec3 dir) {
+      float res = 1.0;
+      float t = epsilon*200.0;
+      for (int i = 0; i < 100; ++i){
+          float h = get_distance (org + dir*t);
+      if (h <= epsilon) {
+              return 0.0;
+      }
+          res = min (res, 32.0*h/t);
+          t += h;
+      if (t >= max_distance) {
+            return res;
+      }
+      
+      }
+      return res;
+  }
+
+  vec4 moon(vec2 uv) {
+    vec4 color = vec4(0.0);
+    
+    vec3 light = vec3(0.0, 0.0, -sun_distance) * rotateY(u_time*.2*SPEED) ;
+    mat3 rotated = rotateY(SPEED*u_time/20.) * rotateX(SPEED*cos(u_time/6.)/4.);
+    
+    if (u_mouse.z > 0.0) {
+        rotated = rotateY(.5 - .5 * u_mouse.x / u_resolution.x) * rotateX(- .5 + .5 * u_mouse.y / u_resolution.y);
+    }
+      
+    vec3 eye_pos = rotated*vec3(0.0, 0.0, -4.0);
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 forward = rotated*vec3(0.0, 0.0, 1.0);
+    vec3 right = cross(up, forward);	
+    
+    vec3 ray_dir = normalize(up * uv.y + right * uv.x + forward);
+
+    float d = raymarch(eye_pos, ray_dir);
+    vec3 point = (eye_pos + ray_dir * d);			
+    
+    if (d < max_distance) {		
+      vec3 point_normal = get_normal(point);
+      
+      vec3 light_dir = -normalize(light-point);
+      vec3 reflected_light_dir = reflect(-light_dir, point_normal);
+      float attenuation = 1.0 / (1.0 + K*pow( length(light/sun_distance - point), .4));
+        
+      float dotp_diffuse = max(0.0, dot(light_dir, point_normal));
+      float dotp_specular = pow(max(0.0, dot(ray_dir, reflected_light_dir)), shininess);
+      
+      // no diffuse -> no specular
+      if (dotp_diffuse <= 0.0) dotp_specular = 0.0;
+      
+      color = 
+              vec4(1.0) *
+              (ambient + 
+                attenuation * 
+                (
+                    dotp_diffuse * diffuse_koef + 
+                    dotp_specular*specular_koef
+                  ) * 
+                shadow_sample(point, -light_dir)
+              ) * 
+              pow(texture3d(texture1, point, normalize(-point), 1.), vec4(1.7));
+      } else {			
+        color = vec4(0.0);	
+    }
+      
+    return color;	
+  }
+
+  void main()
+  {
+    vec2 uv = ((2.0 * gl_FragCoord.xy) - u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    uv *= tan (radians (FOV)/2.0);
+      
+    vec4 sky = mix(vec4(0.), vec4(.2, .4, .5, 1.), sin(u_time / 12.));
+    vec4 color = vec4(0.);
+    
+    #ifndef DISTORT
+    color = moon(uv);
+    #else
+    float tseed = floor(u_time * 10.);
+    vec2 blockS = floor(uv * vec2(24., 9.)) * tseed;
+    vec2 blockL = floor(uv * vec2(8., 4.)) * tseed;
+    
+    float r = rng12(uv * tseed);
+    vec3 noise = (vec3(r, 1. - r, r / 2. + 0.5) * 1.0 - 2.0) * 0.08;
+    
+    float lineNoise = pow(rng12(blockS), 8.0) * pow(rng12(blockL), 3.0) - pow(rng11(7.2341 * tseed), 17.0) * 2.;
+    
+    vec4 col1 = moon(uv);
+    vec4 col2 = moon(uv + vec2(lineNoise * 0.05 * rng11(5.0 * tseed), 0));
+    vec4 col3 = moon(uv - vec2(lineNoise * 0.05 * rng11(31.0 * tseed), 0));
+    color = vec4(vec3(col1.r, col2.g, col3.b) + noise, 1.);
+    #endif
+    
+    gl_FragColor = max(color, sky);
+  }
+</script>
+<script>
+  let camera = new THREE.Camera();
+  camera.position.z = 1;
+
+  let scene = new THREE.Scene();
+  let geometry = new THREE.PlaneBufferGeometry( 2, 2 );
+
+  let uniforms = {
+    u_time: {type: "f", value: 1.0},
+    u_resolution: {type: "v2", value: new THREE.Vector2()},
+    u_mouse: {type: "v3", value: new THREE.Vector3()},
+    texture1: {type: "t", value: THREE.ImageUtils.loadTexture("planet.jpg")}
+  };
+
+  let material = new THREE.ShaderMaterial({
+    uniforms: uniforms,
+    vertexShader: document.getElementById('vs').textContent.trim(),
+    fragmentShader: document.getElementById('fs').textContent.trim()
+  });
+
+  let mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  let canvas = document.getElementById('scene');
+
+  document.body.appendChild(canvas);
+
+  let context = canvas.getContext('webgl');
+  let renderer = new THREE.WebGLRenderer({canvas: canvas, context: context, alpha: true});
+  renderer.setPixelRatio(window.devicePixelRation);
+
+  let resize = () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    uniforms.u_resolution.value.x = renderer.domElement.width;
+    uniforms.u_resolution.value.y = renderer.domElement.height;
+  };
+  window.addEventListener("resize", resize, false);
+  resize();
+
+  document.onmousemove = e => {
+    uniforms.u_mouse.value.x = e.pageX;
+    uniforms.u_mouse.value.y = e.pageY;
+    uniforms.u_mouse.value.z = e.buttons;
+  };
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    uniforms.u_time.value += 0.01;
+
+    // render
+    renderer.render(scene, camera);
+  }
+  animate();
+</script>
+</body>
+</html>

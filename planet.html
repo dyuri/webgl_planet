@@ -60,7 +60,7 @@
   #define sun_distance 1000.0
   #define SPEED .5
   #define PI 3.14159265359
-  #define DISTORT true
+  #define DISTORT 1
 
   vec4 texture3d (sampler2D t, vec3 p, vec3 n, float scale) {
     p = p/PI + .5;
@@ -211,23 +211,36 @@
     vec4 sky = mix(vec4(0.), vec4(.2, .4, .5, 1.), sin(u_time / 12.));
     vec4 color = vec4(0.);
     
-    #ifndef DISTORT
-    color = moon(uv);
-    #else
-    float tseed = floor(u_time * 10.);
-    vec2 blockS = floor(uv * vec2(24., 9.)) * tseed;
-    vec2 blockL = floor(uv * vec2(8., 4.)) * tseed;
-    
-    float r = rng12(uv * tseed);
-    vec3 noise = (vec3(r, 1. - r, r / 2. + 0.5) * 1.0 - 2.0) * 0.08;
-    
-    float lineNoise = pow(rng12(blockS), 8.0) * pow(rng12(blockL), 3.0) - pow(rng11(7.2341 * tseed), 17.0) * 2.;
-    
-    vec4 col1 = moon(uv);
-    vec4 col2 = moon(uv + vec2(lineNoise * 0.05 * rng11(5.0 * tseed), 0));
-    vec4 col3 = moon(uv - vec2(lineNoise * 0.05 * rng11(31.0 * tseed), 0));
-    color = vec4(vec3(col1.r, col2.g, col3.b) + noise, 1.);
-    #endif
+    if (DISTORT == 0) {
+      color = moon(uv);
+    } else if (DISTORT == 1) {
+      float tseed = floor(u_time * 10.);
+      vec2 blockS = floor(uv * vec2(24., 9.)) * tseed;
+      vec2 blockL = floor(uv * vec2(8., 4.)) * tseed;
+      
+      float r = rng12(uv * tseed);
+      vec3 noise = (vec3(r, 1. - r, r / 2. + 0.5) * 1.0 - 2.0) * 0.08;
+
+      float lineNoise = pow(rng12(blockS), 8.0) * pow(rng12(blockL), 3.0) - pow(rng11(7.2341 * tseed), 17.0) * 2.;
+
+      vec4 col1 = moon(uv);
+      vec4 col2 = moon(uv + vec2(lineNoise * 0.05 * rng11(5.0 * tseed), 0));
+      color = vec4(vec3(col1.r, col2.g, col2.b) + noise, 1.);
+    } else {
+      float tseed = floor(u_time * 10.);
+      vec2 blockS = floor(uv * vec2(24., 9.)) * tseed;
+      vec2 blockL = floor(uv * vec2(8., 4.)) * tseed;
+      
+      float r = rng12(uv * tseed);
+      vec3 noise = (vec3(r, 1. - r, r / 2. + 0.5) * 1.0 - 2.0) * 0.08;
+      
+      float lineNoise = pow(rng12(blockS), 8.0) * pow(rng12(blockL), 3.0) - pow(rng11(7.2341 * tseed), 17.0) * 2.;
+      
+      vec4 col1 = moon(uv);
+      vec4 col2 = moon(uv + vec2(lineNoise * 0.05 * rng11(5.0 * tseed), 0));
+      vec4 col3 = moon(uv - vec2(lineNoise * 0.05 * rng11(31.0 * tseed), 0));
+      color = vec4(vec3(col1.r, col2.g, col3.b) + noise, 1.);
+    }
     
     gl_FragColor = max(color, sky);
   }
